@@ -9,6 +9,7 @@ verify_ssl = true
 google-cloud-aiplatform = "*"
 pillow = "*"
 tensorflow = "==2.13.1"
+transformers = "*"
 
 [requires]
 python_version = "3.9"

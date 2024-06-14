@@ -18,6 +18,7 @@ import base64
 from google.cloud import storage
 from google.cloud import aiplatform
 import tensorflow as tf
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 # # W&B
 # import wandb
@@ -66,7 +67,7 @@ def main(args=None):
         storage_client = storage.Client(project=GCP_PROJECT)
         bucket = storage_client.get_bucket(GCS_MODELS_BUCKET_NAME)
 
-        # Use this code if you want to pull your model directly from WandB
+        #Use this code if you want to pull your model directly from WandB
         # WANDB_KEY = os.environ["WANDB_KEY"]
         # # Login into wandb
         # wandb.login(key=WANDB_KEY)
@@ -81,41 +82,40 @@ def main(args=None):
         # print("artifact_dir", artifact_dir)
 
         # Download model
-        download_file(
-            "https://github.com/dlops-io/models/releases/download/v2.0/model-mobilenetv2_train_base_True.v74.zip",
-            base_path="artifacts",
-            extract=True,
-        )
-        artifact_dir = "./artifacts/model-mobilenetv2_train_base_True:v74"
+        # download_file(
+        #     "https://github.com/dlops-io/models/releases/download/v2.0/model-mobilenetv2_train_base_True.v74.zip",
+        #     base_path="artifacts",
+        #     extract=True,
+        # )
+        artifact_dir = "./artifacts/asr_tiny_base"
 
         # Load model
-        prediction_model = tf.keras.models.load_model(artifact_dir)
-        print(prediction_model.summary())
+        processor = WhisperProcessor.from_pretrained(artifact_dir)
+        prediction_model = WhisperForConditionalGeneration.from_pretrained(artifact_dir).to("cuda")
+        print(prediction_model)
 
-        # Preprocess Image
-        def preprocess_image(bytes_input):
-            decoded = tf.io.decode_jpeg(bytes_input, channels=3)
-            decoded = tf.image.convert_image_dtype(decoded, tf.float32)
-            resized = tf.image.resize(decoded, size=(224, 224))
-            return resized
+        # Preprocess Audio
+        def preprocess_audio(bytes_input):
+            audio_array = np.frombuffer(bytes_input, np.float32)
+            return processor(audio_array, return_tensors="tf").input_features
 
         @tf.function(input_signature=[tf.TensorSpec([None], tf.string)])
         def preprocess_function(bytes_inputs):
-            decoded_images = tf.map_fn(
-                preprocess_image, bytes_inputs, dtype=tf.float32, back_prop=False
+            decoded_audios = tf.map_fn(
+                preprocess_audio, bytes_inputs, dtype=tf.float32, back_prop=False
             )
-            return {"model_input": decoded_images}
+            return {"input_features": decoded_audios}
 
         @tf.function(input_signature=[tf.TensorSpec([None], tf.string)])
         def serving_function(bytes_inputs):
-            images = preprocess_function(bytes_inputs)
-            results = model_call(**images)
+            audio_features = preprocess_function(bytes_inputs)
+            results = model_call(**audio_features)
             return results
 
         model_call = tf.function(prediction_model.call).get_concrete_function(
             [
                 tf.TensorSpec(
-                    shape=[None, 224, 224, 3], dtype=tf.float32, name="model_input"
+                    shape=[None, 80, 3000], dtype=tf.float32, name="input_features"
                 )
             ]
         )

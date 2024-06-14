@@ -1,4 +1,5 @@
 # misc
+.idea/
 .DS_Store
 /docker-volumes
 trainer.tar.gz
